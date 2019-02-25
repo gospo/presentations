@@ -25,13 +25,14 @@
 
 \documentclass[letterpaper,twocolumn,10pt]{article}
 \usepackage{int,graphicx,endnotes}
+\setcounter{secnumdepth}{4}
 \begin{document}
 
 %don't want date printed
 \date{}
 
 %make title bold and 14 pt font (Latex default is non-bold, 16 pt)
-\title{\Large \bf Implementing the Next Generation of Network
+\title{\Large \bf Moonshot: Implementing the Next Generation of Network
 Telemetry Technologies}
 
 %for single author (just remove % characters)
@@ -52,26 +53,295 @@ collectors across all nodes in a network (both on servers/hypervisors
 and traditional switches and routers). These can be effective solutions,
 but just as datacenter deployment patterns have evolved new technology
 to track traffic as it moves through the network had emerged. Newer
-specifications like INT~\cite{INT} and IFA~\cite{IFA} propose standards
-to add metadata to packets or clone and add metadata as they flow
-through a network to allow collectors/agents to gather data at the
-network edges. Hardware that supports INT/IFA can add metadata
-automatically with application/flowlevel/virtual-port granularity which
-allows more detailed network monitoring and assurance to customers that
-service levels for applications are being met.
+specifications like Inband Network Telemetry (INT)~\cite{INT} and Inband
+Flow Analyzer (IFA)~\cite{IFA} propose standards to add metadata to
+packets or clone and add metadata as they flow through a network to
+allow collectors/agents to gather data at the network edges. Hardware
+that supports INT/IFA can add metadata automatically with
+application/flowlevel/virtual-port granularity which allows more
+detailed network monitoring and assurance to customers that service
+levels for applications are being met.
 
-\section{Introduction to INT and IFA}
+\section{Introduction to Network Telemetry}
 
-Introduction to INT and IFA network elements including currently proposed on-wire frame formats
+INT and IFA are all designed create a generic method of reporting and
+collecting network state information on individual flows as the packets
+traverse a network.  This allows for collection of data from individual
+hosts or applications as frames that are part of those flows are marked
+with telemetry headers as they entry a telemetry domain.  Network
+devices can interpret telemetry header fields as \textit{telemetry
+instructions} and a capable device will update packet headers and
+header-fields \textit{In-Situ} -- as a frame traverses the network.
+Marking frames as they travel through a network allows detailed
+reporting of the exact data-plane used by packets on the network as well
+as enables real-time feedback loops and event detection.  This
+information can also be sent to an external collector for
+post-processing if desired.  
 
-\subsection{INT Frame Formats}
+\subsection{Network Telemetry Components}
 
-\subsection{IFA Frame Formats}
+Despite using slightly different nomenclature, the fundamental
+components of the two main telemetry technolgies covered in the paper
+are similar.
+
+\subsubsection{Source or Initiator Node}
+This is a trusted entity that creates the initial telemetry header and
+places it into packets that are transmitted.
+
+\subsubsection{Transit Hop or Transit Node}
+Any network element that adds telemetry metadata to a packet that
+that contains supported telemetry instructions.
+
+\subsubsection{Sink or Terminating Node}
+This is a trusted entity that removes telemetry headers from frames to
+make the existence of the the headers transparent to applications.  This
+trusted entity will use the headers and other local configuration to
+determine if information needs to be sent to a collector.
+
+\subsubsection{Collector}
+An application that will receive telemetry data collected by a Sink or
+Terminating node.
+
+\subsubsection{Typical Packet Flow}
+
+Below is a diagram of a typical packet path of a network flow and IFA
+flow through the components described in the previous section.  In this
+case the IFA flow is a sample of the flow, so two frames travel between
+the Initiator Node and the Terminating Node.
+
+This was adapted from the latest IFA specification and the time fo this
+writing:
+\tiny
+\begin{center}
+\begin{verbatim}
+                              +----------+
+                              |          |
+                              |Collector |<-------------+
+                              |          |              |
+                              +----------+              |
+                                                        |
+                                                        |
+                                                        |
+                                                        |
+                                                        |
+                                                        |
+                                                        | 
+                                                        |
+     +--------------+        +------------+        +----+-----------+
+     |Initiator Node|        |Transit Node|        |Terminating Node|
+flow |   +------+   |  flow  |  +------+  |  flow  |     +------+   | flow
+---->|   | IFA  |   |------->|  | IFA  |  |------->|     | IFA  |   |---->
+     |   +------+   |IFA flow|  +------+  |IFA flow|     +------+   |
+     +--------------+        +------------+        +----------------+
+\end{verbatim}
+\end{center}
+\normalsize
+
+In the case where an Initiator and Terminating nodes are switches or
+other forwarding elements on a network, flows could originate from an
+external device and exit to another device.  Initiator and Terminating
+Nodes could also be servers with supported hardware and software stacks.
+In that case flows may originate or teminate on the IFA/INT node rather
+than originating/terminating from an external device.
+
+This paper does not intend to cover the full scope of each telemetry
+technology and feature; anyone who would like to learn more should
+consider reading the latest INT and IFA specifications.  It will cover
+some basic frame formats of each proposal in order to provide context
+for an implementation discussion.
+
+\section{Inband Network Telemetry (INT)}
+
+Inband Network Telemetry is a framework suggested by
+those interested in using P4 to create a programmable pipeline for
+networking forwarding elements.  INT has multiple methods for collecting
+information about the network: frames are updated as they traverse the
+network or special \textit{probe packets} are used to collect
+information about the network.  In addition to defining the frame format
+and fields, the latest INT specification also conveniently provides a P4
+program specification for INT Transmit.
+
+\subsubsection{INT Frame Format}
+
+The current INT specification describes the following formats as being able to
+support additional encapsulation headers to support INT:
+
+\begin{itemize}
+\item INT over VXLAN (as VXLAN payload, per GPE extension)
+\item INT over Geneve (as Geneve option)
+\item INT over GRE (as a shim between GRE header and encapsulated payload)
+\item INT over NSH (as NSH payload)
+\end{itemize}
+
+Additionally the INT specification also describes how DSCP bits or
+\textit{probe markers} can be placed in the payload of packet (after the Layer4
+header) to support these packet formats.
+
+\begin{itemize}
+\item INT over TCP (as payload)
+\item INT over UDP (as payload)
+\end{itemize}
+
+Though many datacenter networks use encapsulated traffic (VXLAN, Geneve,
+or GRE), the fact that INT does not have native support unencapsulated
+traffic (standard IPv4/IPv6 and TCP/UDP) could be an issue for some
+deployments.
+
+The specified frame format for an INT IPv4/TCP frame would be as follows:
+
+\begin{center}
+\tiny
+\begin{verbatim}
+       0                   1                   2                   3
+       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |                        IP Header                              |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |                         Layer 4                               |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |                      INT Shim Header                          |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |                    INT Metadata Header                        |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |                         Payload                               |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+\end{verbatim}
+\normalsize
+\end{center}
+
+Remember that the INT Headers and Payload together are viewed as the full
+payload to any non-INT-aware device, so anytime INT headers are added to
+a packet any fields that account for the size of the packet or
+payload will need to be adjusted.
+
+If the decision to use a reserved DSCP mark (0x17 in this case) to
+indicate a packet contained INT headers would cause the IPv4 header to
+look like this:
+
+\tiny
+\begin{center}
+\begin{verbatim}
+       0                   1                   2                   3
+       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+      IPv4 Header:
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      | Ver=4 | IHL=5 | DSCP=0x17 |ECN|          Total Length         |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |         Identification        |Flags|      Fragment Offset    |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |  Time to Live | Protocol = TCP|         Header Checksum       |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |                     Source IPv4 Address                       |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |                  Destination IPv4 Address                     |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+\end{verbatim}
+\end{center}
+\normalsize
+
+The INT specification also outlines suggestions for how to deal with
+frames as they grow beyond the MTU, how to deal with false detection of
+\textit{probe markers} contained in payload data of non-INT frames, as well as
+other deployment scenarios.
+
+\section{Inband Flow Analyzer (IFA)}
+
+The initial IFA specification was drafted later than other initial
+telemetry technologies and while similar, it aims to address some of the
+shortcomings of INT and IOAM.  One of the main differences is the
+ability to send telemetry metadata via a cloned frame rather than via
+the original datagram.  
+
+Allowing cloned frames provides benefits over In-Situ modification of
+frames.  One benefit of cloning is administrators do not need to be
+concerned about frames growing beyond the MTU since there is also
+support to allow truncation of frames that are beyond the size of the
+MTU.  The IFA specification also indicates that adding metadata to live
+traffic is a requirement but this cloning feature is a nice addition to
+avoid disruption of PMTU discovery.
+
+The proposed frame/header format was modified significantly from the INT
+specification.  The goal was to make the frame format more acceptable to
+devices that were not IFA-aware.
+
+\subsubsection{IFA Frame Format}
+The IFA spec outlines a significantly different scheme for the location
+to telemetry metadata.  From the start IFA aims to interoperate with
+unencapsulated IPv4 and IPv6 traffic.  This is accomplished by using the
+IPv4 \textit{Protocol} and IPv6 \textit{Next Header} fields to specify
+that this frame is an IFA frame.  (There is no current reservation for
+IFA protocol, so testing currently uses one of the experimental protocol
+numbers.)
+
+The specified frame format for an IFA IPv4/TCP frame would be as follows:
+\tiny
+\begin{center}
+\begin{verbatim}
+       0                   1                   2                   3
+       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |                        IP Header                              |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |                       IFA Header                              |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |                         Layer 4                               |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |                         Payload                               |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |                   IFA Metadata Stack                          |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |                   IFA Metadata Header                         |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+\end{verbatim}
+\end{center}
+\normalsize
+
+A closer look at the IPv4 header demonstrates that Protocol=IFA would be
+used to signal that this frame is an IFA frame:
+
+\tiny
+\begin{center}
+\begin{verbatim}
+       0                   1                   2                   3
+       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+      IPv4 Header:
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |Version|  IHL  |Type of Service|          Total Length         |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |         Identification        |Flags|      Fragment Offset    |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |  Time to Live | Protocol = IFA|         Header Checksum       |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |                     Source IPv4 Address                       |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |                  Destination IPv4 Address                     |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+\end{verbatim}
+\end{center}
+\normalsize
+
+Additionally the IFA Header provides a Next Header field that would
+indicate that TCP is the next protocol:
+
+\tiny
+\begin{center}
+\begin{verbatim}
+       0                   1                   2                   3
+       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+      IFA Header:
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+      |Ver=2.0|  GNS  | NextHdr = TCP |R|R|R|M|T|I|T|C|   Max Length  |
+      |       |       |               | | | |F|S| |A| |               |
+      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+\end{verbatim}
+\end{center}
+\normalsize
 
 \section{Hardware Requirements}
 
-Hardware requirements/implementations for handling IFA/INT today and the challenges facing those
-wanting to implement them in hardware and software.
+Hardware requirements/implementations for handling IFA/INT today and the
+challenges facing those wanting to implement them in hardware and
+software.  
 
 \section{Possible Configuration Methods}
 
