@@ -415,38 +415,12 @@ not be able to serve as a collector.
   \end{center}
 \end{table}
 
-\section{Hardware Considerations}
+\section{Thinking Beyond the Kernel Datapath}
+
+\subsection{Hardware Support for Telemetry}
 
 [Hardware requirements/implementations for handling IFA/INT today and the
 challenges facing those wanting to implement them in hardware.]
-
-\subsection{Host-based configuration}
-
-The standard configuration method that most will desire is one that is
-configured on the host via standard interfaces that are used to
-communicate between userspace and hardware.  Several options exist to
-accomplish this.
-
-Fundamentally it will go like this:
-
-Create IFA device or tunnel/encap
-\tiny
-\begin{verbatim}
-ip link set -> kernel -> nl broadcast -> bnxt\_en -> configure hardware
-\end{verbatim}
-\normalsize
-
-Sample and redirect traffic to tunnel/ifa device
-\tiny
-\begin{verbatim}
-tc sample/redirect -> kernel -> bnxt\_en -> configure hardware
-\end{verbatim}
-\normalsize
-
-The kernel interfaces to receive the netlink messages (lwt seems like
-the best option right now) and the driver work to process the nl
-messages for IFA and add the parameters to hardware.
-
 
 \subsection{Network-based configuration}
 
@@ -465,11 +439,26 @@ network adminstrators still desire the ability to interact more directly
 with network devices.  Servers acting as an INT Source or IFA Initiator
 Node could make the lives of network adminstrators easier.
 
-A fairly RESTful API could be used to control the INT/IFA configuration
+A RESTful API could be used to control the INT/IFA configuration
 of a server much the same way that such APIs are often used to control
 traditional networking equipment.
 
-\section{Telemetry Deployment Risks}
+\subsection{Complete Userspace Implementations}
+
+No discussion about new datapath technologies would be complete without
+addressing whether or not this could be implemented with a PMD/DPDK.  Is
+unlikely that anyone would implement or deploy a DPDK-based application
+on a server or switch for the sole purpose of performing any of the
+functions needed for INT/IFA.
+
+It is likely, however, that someone using a DPDK-based application for
+performing forwarding in the core of a network may want to add INT/IFA
+functionality to their application.  A library that could create, add
+metadata, or terminate telemetry packets could be written to integrate
+with any dataplane applcation.  At the time of this writing no known
+library or solution exists.
+
+\section{Telemetry Development and Deployment}
 
 \subsection{User Risk}
 
@@ -483,10 +472,12 @@ infrastructure.
 
 \subsection{Community Risk}
 
-One of the major risks to adding new code to the Linux kernel is what
-happens to existing code when standards change.  For users of upstream
-kernels this is not that difficult as a \texttt{git pull} and
-\texttt{make ...} can result in a code updated to the latest standard.
+One of the major risks to adding new code to the Linux kernel or any
+dataplane application is what happens to existing code when standards
+change.  For users of upstream kernels or who build their own
+applications this is not that difficult -- a \texttt{git pull} and
+\texttt{make ...} can result in a code updated to the latest standard
+supported by that project.
 
 Unfortunately a standard like INT or IFA will may also require changes
 to other network infrastructure to handle these changes and not everyone
