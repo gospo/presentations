@@ -38,7 +38,8 @@ Telemetry Technologies}
 %for single author (just remove % characters)
 \author{
 {\rm Andy Gospodarek}\\
-Broadcom Corporation
+Broadcom Corporation\\
+gospo@broadcom.com
 % copy the following lines to add more authors
 % \and
 % {\rm Name}\\
@@ -267,9 +268,9 @@ devices that were not IFA-aware.
 \subsubsection{IFA Frame Format}
 The IFA spec outlines a significantly different scheme for the location
 to telemetry metadata.  From the start IFA aims to interoperate with
-unencapsulated IPv4 and IPv6 traffic.  This is accomplished by using the
-IPv4 \textit{Protocol} and IPv6 \textit{Next Header} fields to specify
-that this frame is an IFA frame.  (There is no current reservation for
+encapsulated and unencapsulated IPv4 and IPv6 traffic.  This is accomplished by
+using the IPv4 \textit{Protocol} and IPv6 \textit{Next Header} fields to
+specify that this frame is an IFA frame.  (There is no current reservation for
 IFA protocol, so testing currently uses one of the experimental protocol
 numbers.)
 
@@ -337,25 +338,161 @@ indicate that TCP is the next protocol:
 \end{center}
 \normalsize
 
-\section{Hardware Requirements}
+\section{Software Architecture}
 
-Hardware requirements/implementations for handling IFA/INT today and the
-challenges facing those wanting to implement them in hardware and
-software.  
+In order to add support for a software model for INT or IFA, it is
+important to understand the discrete componets available within the
+GNU/Linux ecosystem that could be used with or without modification to
+add support for INT or IFA.  What follows is a list of each of the
+nodes in a telemetry implementation, the functional blocks needed to
+implement those features, and what existing kernel components could be
+the target for performing those functions.
 
-\section{Possible Configuration Methods}
+\subsection{Initiator Node}
+The critical datapath operations of sample and mirror (IFA) or sample
+and redirect(INT/IFA) are the most important part of the Initiator Node
+implementation.
 
-Proposals for configuring INT/IFA in both software dataplane and
-hardware dataplane environments on supported hardware.
+\begin{table}[h!]
+  \begin{center}
+    \caption{Initiator Node}
+    \label{tab:table1}
+    \begin{tabular}{l|l}
+      \textbf{Desired Functionality} & \textbf{Kernel Implementation} \\
+      \hline
+      Packet sampling & TC or netfilter \\
+      \hline
+      Packet mirror(IFA) & TC \\
+      \hline
+      Packet redirect(INT/IFA) & TC or XDP/eBPF \\
+      \hline
+      Encapsulate and TX INT/IFA & lwtunnel or XDP/eBPF \\
+    \end{tabular}
+  \end{center}
+\end{table}
+
+
+\subsection{Transit Node}
+For a device to function as a Transit Node there must be support to
+recognize the frame in the kernel datapath.  Once the frame is
+recognized one could either pass the traffic to a lwtunnel or eBPF
+program for modification.
+
+\begin{table}[h!]
+  \begin{center}
+    \caption{Transit Node}
+    \label{tab:table2}
+    \begin{tabular}{l|l}
+      \textbf{Desired Functionality} & \textbf{Kernel Implementation} \\
+      \hline
+      Match on INT/IFA Packet & TC \\
+      \hline
+      Update metadata and TX & lwtunnel or XDP/eBPF \\
+    \end{tabular}
+  \end{center}
+\end{table}
+
+\subsection{Collector Node}
+The ability to match on all of the formats (or the enabled formats used
+in a deployment) is the critical role of a Collector Node.  Without this
+functionality in TC or netfilter a system running the Linux kernel would
+not be able to serve as a collector.
+\begin{table}[h!]
+  \begin{center}
+    \caption{Collector Node}
+    \label{tab:table3}
+    \begin{tabular}{l|l}
+      \textbf{Desired Functionality} & \textbf{Kernel Implementation} \\
+      \hline
+      Match on INT/IFA frame & TC or netfilter \\
+      \hline
+      Collect metadata from frame & lwtunnel or XDP/eBPF \\
+      \hline
+      Send frame to collector & lwtunnel or XDP/eBPF \\
+      \hline
+      Transmit original frame (INT) & lwtunnel or XDP/eBPF \\
+    \end{tabular}
+  \end{center}
+\end{table}
+
+\section{Hardware Considerations}
+
+[Hardware requirements/implementations for handling IFA/INT today and the
+challenges facing those wanting to implement them in hardware.]
 
 \subsection{Host-based configuration}
 
+The standard configuration method that most will desire is one that is
+configured on the host via standard interfaces that are used to
+communicate between userspace and hardware.  Several options exist to
+accomplish this.
+
+Fundamentally it will go like this:
+
+Create IFA device or tunnel/encap
+\tiny
+\begin{verbatim}
+ip link set -> kernel -> nl broadcast -> bnxt\_en -> configure hardware
+\end{verbatim}
+\normalsize
+
+Sample and redirect traffic to tunnel/ifa device
+\tiny
+\begin{verbatim}
+tc sample/redirect -> kernel -> bnxt\_en -> configure hardware
+\end{verbatim}
+\normalsize
+
+The kernel interfaces to receive the netlink messages (lwt seems like
+the best option right now) and the driver work to process the nl
+messages for IFA and add the parameters to hardware.
+
+
 \subsection{Network-based configuration}
 
-\section{Risks and Rewards}
+There are also use-cases where datacenter administrators will want to
+enable IFA on a host without requiring communication with the server OS.
+This could be done via configuration commands on a BMC or management
+processor or directly with a NIC itself.  While this method is
+traditionally seen as less popular to those within the open-source
+community who expect to have exclusive control over their hardware,
+industry deployment trends indicate that this is a popular and prefereed
+method for many.
 
-Assessing and minimizing risk associated with the maintenance of
-deploying an early draft of a standard.
+The main use-case for network-based configuration is in datacenters
+where baremetal servers are provided to users.  In these deployments
+network adminstrators still desire the ability to interact more directly
+with network devices.  Servers acting as an INT Source or IFA Initiator
+Node could make the lives of network adminstrators easier.
+
+A fairly RESTful API could be used to control the INT/IFA configuration
+of a server much the same way that such APIs are often used to control
+traditional networking equipment.
+
+\section{Telemetry Deployment Risks}
+
+\subsection{User Risk}
+
+Obviously the deployment of any new technology brings along with it some
+risk.  Even looking at the changes between the first two versions of
+IFA\footnote{https://tools.ietf.org/rfcdiff?url2=draft-kumar-ippm-ifa-01.txt} 
+highlights that this is an evolving standard with the addition of new
+metadata formats and an increased list of packet formats.  The risk is
+minimized when a single organization controls all networking
+infrastructure.
+
+\subsection{Community Risk}
+
+One of the major risks to adding new code to the Linux kernel is what
+happens to existing code when standards change.  For users of upstream
+kernels this is not that difficult as a \texttt{git pull} and
+\texttt{make ...} can result in a code updated to the latest standard.
+
+Unfortunately a standard like INT or IFA will may also require changes
+to other network infrastructure to handle these changes and not everyone
+may have access to the latest hardware running the latest versions of
+software.  As mentioned in the previous section, unfied management of
+infrastructure will prevent his from being a major issue.
 
 \section{Acknowledgments}
 
@@ -365,7 +502,6 @@ standard, but did provide code, feedback, etc during this process.
 
 {\normalsize \bibliographystyle{acm}
 \bibliography{int}}
-
 
 \theendnotes
 
