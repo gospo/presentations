@@ -24,7 +24,7 @@
 % Updated July 2018: Text block size changed from 6.5" to 7"
 
 \documentclass[letterpaper,twocolumn,10pt]{article}
-\usepackage{int,graphicx,endnotes}
+\usepackage{int,graphicx,endnotes,url}
 \setcounter{secnumdepth}{4}
 \begin{document}
 
@@ -54,8 +54,8 @@ collectors across all nodes in a network (both on servers/hypervisors
 and traditional switches and routers). These can be effective solutions,
 but just as datacenter deployment patterns have evolved new technology
 to track traffic as it moves through the network had emerged. Newer
-specifications like Inband Network Telemetry (INT)~\cite{INT} and Inband
-Flow Analyzer (IFA)~\cite{IFA} propose standards to add metadata to
+specifications like Inband Network Telemetry\cite{INT} (INT) and Inband
+Flow Analyzer\cite{IFA} (IFA) propose standards to add metadata to
 packets or clone and add metadata as they flow through a network to
 allow collectors/agents to gather data at the network edges. Hardware
 that supports INT/IFA can add metadata automatically with
@@ -87,7 +87,10 @@ are similar.
 
 \subsubsection{Source or Initiator Node}
 This is a trusted entity that creates the initial telemetry header and
-places it into packets that are transmitted.
+places it into packets that are transmitted.  One important note is that
+this node is expected to only add an initial telemetry header to a
+small, sampled percentage of the traffic transmitted.  This is
+explicitly to reduce network load.
 
 \subsubsection{Transit Hop or Transit Node}
 Any network element that adds telemetry metadata to a packet that
@@ -110,7 +113,7 @@ flow through the components described in the previous section.  In this
 case the IFA flow is a sample of the flow, so two frames travel between
 the Initiator Node and the Terminating Node.
 
-This was adapted from the latest IFA specification and the time fo this
+This was adapted from the latest IFA specification at the time of this
 writing:
 \tiny
 \begin{center}
@@ -342,7 +345,7 @@ indicate that TCP is the next protocol:
 
 In order to add support for a software model for INT or IFA, it is
 important to understand the discrete componets available within the
-GNU/Linux ecosystem that could be used with or without modification to
+Linux ecosystem that could be used with or without modification to
 add support for INT or IFA.  What follows is a list of each of the
 nodes in a telemetry implementation, the functional blocks needed to
 implement those features, and what existing kernel components could be
@@ -415,19 +418,45 @@ not be able to serve as a collector.
   \end{center}
 \end{table}
 
-\section{Thinking Beyond the Kernel Datapath}
+The largest volume of work to support INT/IFA in the Linux kernel
+is included in the TC (specifically related to sampling) and lwtunnel
+subsystem.  While an initial proof-of-concept could be done with eBPF,
+long-term it seems like use of the lwtunnel infrastructure would be
+better.
+
+Use of the kernel for performing INT/IFA encapsulation could be seen by
+some as more work than necessary.  Some would argue that this could be
+solved with a simple userspace daemon.  The need to support
+\textit{In-Situ} encapsulation of packets means that the Linux kernel
+must be aware of this encapsulation.  The desire to add support to
+configure hardware that is capable of INT/IFA offload also means that
+this functionality \textbf{must} be included in the Linux kernel.
+
+\section{Thinking Beyond the Linux Kernel Datapath}
 
 \subsection{Hardware Support for Telemetry}
 
-[Hardware requirements/implementations for handling IFA/INT today and the
-challenges facing those wanting to implement them in hardware.]
+\subsubsection{Switch Hardware}
+
+Based on the fact that INT is a P4 standard and the fact that several
+switch vendors and switch ASIC vendors are active in INT and IFA
+standards writing, it is clear that there is an interest in telemetry on
+those platforms.
+
+\subsubsection{NIC Hardware}
+
+Based on the fact that several NIC vendors are active in INT and IFA
+standards writing it is clear that there is an interest in telemetry
+using those NICs.  There have been presentations given on NIC+FPGA
+solutions for IOAM, but users should expect more fixed-function devices
+will add support soon.
 
 \subsection{Network-based configuration}
 
 There are also use-cases where datacenter administrators will want to
-enable IFA on a host without requiring communication with the server OS.
-This could be done via configuration commands on a BMC or management
-processor or directly with a NIC itself.  While this method is
+enable IFA on a server host without requiring communication with the
+server OS.  This could be done via configuration commands on a BMC or
+management processor or directly with a NIC.  While this method is
 traditionally seen as less popular to those within the open-source
 community who expect to have exclusive control over their hardware,
 industry deployment trends indicate that this is a popular and prefereed
@@ -436,12 +465,16 @@ method for many.
 The main use-case for network-based configuration is in datacenters
 where baremetal servers are provided to users.  In these deployments
 network adminstrators still desire the ability to interact more directly
-with network devices.  Servers acting as an INT Source or IFA Initiator
-Node could make the lives of network adminstrators easier.
+with network devices.  Servers acting as an Source or Initiator Node
+could make the lives of network adminstrators easier.  As NIC hardware
+that supports INT/IFA emerges configuration in this manner will gain
+popularity.
 
 A RESTful API could be used to control the INT/IFA configuration
 of a server much the same way that such APIs are often used to control
-traditional networking equipment.
+traditional networking equipment.  There may ultimately be a common
+framework that exists to enable INT/IFA on a server or switch with the
+same API.
 
 \subsection{Complete Userspace Implementations}
 
@@ -466,9 +499,9 @@ Obviously the deployment of any new technology brings along with it some
 risk.  Even looking at the changes between the first two versions of
 IFA\footnote{https://tools.ietf.org/rfcdiff?url2=draft-kumar-ippm-ifa-01.txt} 
 highlights that this is an evolving standard with the addition of new
-metadata formats and an increased list of packet formats.  The risk is
-minimized when a single organization controls all networking
-infrastructure.
+metadata formats and an increased list of packet formats.  One way to
+minimize risk is to be sure that any devices participating are all
+managed/controlled by the same organization.
 
 \subsection{Community Risk}
 
