@@ -277,7 +277,7 @@ specify that this frame is an IFA frame.  (There is no current reservation for
 IFA protocol, so testing currently uses one of the experimental protocol
 numbers.)
 
-The specified frame format for an IFA IPv4/TCP frame would be as follows:
+One specified frame format for an IFA IPv4/TCP frame would be as follows:
 \tiny
 \begin{center}
 \begin{verbatim}
@@ -290,11 +290,11 @@ The specified frame format for an IFA IPv4/TCP frame would be as follows:
       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
       |                         Layer 4                               |
       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-      |                         Payload                               |
+      |                   IFA Metadata Header                         |
       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
       |                   IFA Metadata Stack                          |
       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-      |                   IFA Metadata Header                         |
+      |                         Payload                               |
       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 \end{verbatim}
 \end{center}
@@ -395,21 +395,21 @@ program for modification.
   \end{center}
 \end{table}
 
-\subsection{Collector Node}
+\subsection{Terminating Node}
 The ability to match on all of the formats (or the enabled formats used
-in a deployment) is the critical role of a Collector Node.  Without this
+in a deployment) is the critical role of a Terminating Node.  Without this
 functionality in TC or netfilter a system running the Linux kernel would
 not be able to serve as a collector.
 \begin{table}[h!]
   \begin{center}
-    \caption{Collector Node}
+    \caption{Terminating Node}
     \label{tab:table3}
     \begin{tabular}{l|l}
       \textbf{Desired Functionality} & \textbf{Kernel Implementation} \\
       \hline
       Match on INT/IFA frame & TC or netfilter \\
       \hline
-      Collect metadata from frame & lwtunnel or XDP/eBPF \\
+      Extract metadata from frame & lwtunnel or XDP/eBPF \\
       \hline
       Send frame to collector & lwtunnel or XDP/eBPF \\
       \hline
