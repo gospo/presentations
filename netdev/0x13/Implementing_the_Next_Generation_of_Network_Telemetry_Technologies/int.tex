@@ -50,10 +50,10 @@ gospo@broadcom.com
 
 \subsection*{Abstract}
 Current network monitoring and telemetry applications require host-based
-collectors across all nodes in a network (both on servers/hypervisors
-and traditional switches and routers). These can be effective solutions,
+collectors across all nodes in a network (servers/hypervisors
+and traditional switches/routers). These can be effective solutions,
 but just as datacenter deployment patterns have evolved new technology
-to track traffic as it moves through the network had emerged. Newer
+to track traffic as it moves through the network has emerged. Newer
 specifications like Inband Network Telemetry\cite{INT} (INT) and Inband
 Flow Analyzer\cite{IFA} (IFA) propose standards to add metadata to
 packets or clone and add metadata as they flow through a network to
@@ -69,42 +69,50 @@ INT and IFA are all designed create a generic method of reporting and
 collecting network state information on individual flows as the packets
 traverse a network.  This allows for collection of data from individual
 hosts or applications as frames that are part of those flows are marked
-with telemetry headers as they entry a telemetry domain.  Network
-devices can interpret telemetry header fields as \textit{telemetry
-instructions} and a capable device will update packet headers and
-header-fields \textit{In-Situ} -- as a frame traverses the network.
-Marking frames as they travel through a network allows detailed
-reporting of the exact data-plane used by packets on the network as well
-as enables real-time feedback loops and event detection.  This
-information can also be sent to an external collector for
+with \textit{telemetry headers} as they entry a \textit{telemetry
+domain}.  Network devices can interpret telemetry header fields as
+\textit{telemetry instructions} and a capable device will update packet
+headers and header-fields \textit{in-situ} -- as a frame traverses the
+network.  Marking frames as they travel through a network allows
+detailed reporting of the exact path used by packets on the
+network as well as enables real-time feedback loops and event detection.
+This information can also be sent to an external collector for
 post-processing if desired.  
 
 \subsection{Network Telemetry Components}
 
 Despite using slightly different nomenclature, the fundamental
-components of the two main telemetry technolgies covered in the paper
+components of the telemetry technolgies covered in the paper
 are similar.
 
 \subsubsection{Source or Initiator Node}
 This is a trusted entity that creates the initial telemetry header and
-places it into packets that are transmitted.  One important note is that
-this node is expected to only add an initial telemetry header to a
-small, sampled percentage of the traffic transmitted.  This is
-explicitly to reduce network load.
+instructions and places them into packets that are transmitted.  One
+important note is that this node is expected to only add an initial
+telemetry header to a small, sampled percentage of the traffic
+transmitted.
 
 \subsubsection{Transit Hop or Transit Node}
 Any network element that adds telemetry metadata to a packet that
-that contains supported telemetry instructions.
+that contains supported telemetry header and instructions.
 
 \subsubsection{Sink or Terminating Node}
-This is a trusted entity that removes telemetry headers from frames to
-make the existence of the the headers transparent to applications.  This
-trusted entity will use the headers and other local configuration to
-determine if information needs to be sent to a collector.
+This is a trusted entity that removes all telemetry headers,
+instructions, and metadata from in-situ frames or drops out-of-band
+frames to make the existence of telemetry applications transparent to
+applications.  This trusted entity will use the headers and other local
+configuration to determine if information needs to be sent to a
+collector.  This node will then format and deliver the frame to the
+Collector node or application.
 
 \subsubsection{Collector}
 An application that will receive telemetry data collected by a Sink or
 Terminating node.
+
+\subsubsection{Telemetry Domain}
+A set of interconnected devices participating in telemetry actions all
+under the same administrative control.  It is critical that devices in
+the same domain are all configured to behave in a consistent manner.
 
 \subsubsection{Typical Packet Flow}
 
@@ -136,34 +144,45 @@ writing:
 flow |   +------+   |  flow  |  +------+  |  flow  |     +------+   | flow
 ---->|   | IFA  |   |------->|  | IFA  |  |------->|     | IFA  |   |---->
      |   +------+   |IFA flow|  +------+  |IFA flow|     +------+   |
-     +--------------+        +------------+        +----------------+
+     +--------------+(cloned)+------------+(cloned)+----------------+
+
+     |------------------------ IFA Domain --------------------------|
+
 \end{verbatim}
 \end{center}
 \normalsize
 
-In the case where an Initiator and Terminating nodes are switches or
-other forwarding elements on a network, flows could originate from an
-external device and exit to another device.  Initiator and Terminating
-Nodes could also be servers with supported hardware and software stacks.
-In that case flows may originate or teminate on the IFA/INT node rather
-than originating/terminating from an external device.
+Initiator and Terminating Nodes could be servers with supported hardware
+and software stacks or switches, routers, or other forwarding elements
+on a network.  The flows may originate or teminate on the IFA/INT node
+if that node is on the edge of the IFA Domain.  If the network extends
+beyond the IFA Domain, flows originate or terminate outside the IFA
+Domain.
 
 This paper does not intend to cover the full scope of each telemetry
 technology and feature; anyone who would like to learn more should
-consider reading the latest INT and IFA specifications.  It will cover
-some basic frame formats of each proposal in order to provide context
-for an implementation discussion.
+consider reading the latest INT and IFA specifications.  This paper will
+cover some basic frame formats of each proposal in order to provide
+context for an implementation discussion.
 
 \section{Inband Network Telemetry (INT)}
 
 Inband Network Telemetry is a framework suggested by
 those interested in using P4 to create a programmable pipeline for
 networking forwarding elements.  INT has multiple methods for collecting
-information about the network: frames are updated as they traverse the
-network or special \textit{probe packets} are used to collect
-information about the network.  In addition to defining the frame format
-and fields, the latest INT specification also conveniently provides a P4
-program specification for INT Transmit.
+information about the network:
+
+\begin{itemize}
+\item A sampled percentage of the frames are updated as they traverse
+the network 
+\item New \textit{probe packets} are injected and used to collect
+telemetry information as they traverse the network.
+\end{itemize}
+In addition to defining the frame format and fields, the latest INT
+specification also conveniently provides a P4 program specification for
+INT Transmit for hardware or software that can use a P4 datapath.
+Support for INT is not limited to devices using a programmable datapath
+like P4.
 
 \subsubsection{INT Frame Format}
 
@@ -252,17 +271,15 @@ other deployment scenarios.
 
 The initial IFA specification was drafted later than other initial
 telemetry technologies and while similar, it aims to address some of the
-shortcomings of INT and IOAM.  One of the main differences is the
-ability to send telemetry metadata via a cloned frame rather than via
-the original datagram.  
+shortcomings of INT.  One of the main differences is the
+ability to send telemetry metadata out-of-band via cloned frames rather
+than via the original datagram.  Like INT however, IFA supports adding
+metadata to live traffic in-band.  
 
-Allowing cloned frames provides benefits over In-Situ modification of
+Allowing cloned frames provides benefits over in-band modification of
 frames.  One benefit of cloning is administrators do not need to be
-concerned about frames growing beyond the MTU since there is also
-support to allow truncation of frames that are beyond the size of the
-MTU.  The IFA specification also indicates that adding metadata to live
-traffic is a requirement but this cloning feature is a nice addition to
-avoid disruption of PMTU discovery.
+concerned about frames growing beyond the MTU.  As expected frame
+payloads will be truncated when needed.
 
 The proposed frame/header format was modified significantly from the INT
 specification.  The goal was to make the frame format more acceptable to
@@ -273,9 +290,9 @@ The IFA spec outlines a significantly different scheme for the location
 to telemetry metadata.  From the start IFA aims to interoperate with
 encapsulated and unencapsulated IPv4 and IPv6 traffic.  This is accomplished by
 using the IPv4 \textit{Protocol} and IPv6 \textit{Next Header} fields to
-specify that this frame is an IFA frame.  (There is no current reservation for
-IFA protocol, so testing currently uses one of the experimental protocol
-numbers.)
+specify that this frame is an IFA frame.  There is no current IANA
+reservation for IFA protocol, so testing should use one of the
+experimental protocol numbers as described by RFC3692\cite{RFC3692}.
 
 One specified frame format for an IFA IPv4/TCP frame would be as follows:
 \tiny
@@ -341,7 +358,7 @@ indicate that TCP is the next protocol:
 \end{center}
 \normalsize
 
-\section{Software Architecture}
+\section{Linux Kernel Software Architecture}
 
 In order to add support for a software model for INT or IFA, it is
 important to understand the discrete componets available within the
@@ -418,6 +435,8 @@ not be able to serve as a collector.
   \end{center}
 \end{table}
 
+
+\subsection{Implementation Summary}
 The largest volume of work to support INT/IFA in the Linux kernel
 is included in the TC (specifically related to sampling) and lwtunnel
 subsystem.  While an initial proof-of-concept could be done with eBPF,
@@ -427,29 +446,22 @@ better.
 Use of the kernel for performing INT/IFA encapsulation could be seen by
 some as more work than necessary.  Some would argue that this could be
 solved with a simple userspace daemon.  The need to support
-\textit{In-Situ} encapsulation of packets means that the Linux kernel
-must be aware of this encapsulation.  The desire to add support to
-configure hardware that is capable of INT/IFA offload also means that
-this functionality \textbf{must} be included in the Linux kernel.
+in-band encapsulation of packets means that the Linux kernel
+must be aware of this encapsulation.
 
-\section{Thinking Beyond the Linux Kernel Datapath}
+The desire to add support to configure hardware that is capable of
+INT/IFA offload also means that this functionality \textbf{must} be
+included in the Linux kernel.
+
+\section{Beyond the Linux Kernel Datapath}
 
 \subsection{Hardware Support for Telemetry}
 
-\subsubsection{Switch Hardware}
-
-Based on the fact that INT is a P4 standard and the fact that several
-switch vendors and switch ASIC vendors are active in INT and IFA
-standards writing, it is clear that there is an interest in telemetry on
-those platforms.
-
-\subsubsection{NIC Hardware}
-
-Based on the fact that several NIC vendors are active in INT and IFA
-standards writing it is clear that there is an interest in telemetry
-using those NICs.  There have been presentations given on NIC+FPGA
-solutions for IOAM, but users should expect more fixed-function devices
-will add support soon.
+As with any new standards-based technology, manufacturers of networking
+hardware will make hardware capable of INT and/or IFA when there is
+significant customer demand.  Existing devices with programmable
+pipelines seem like the primary target, but fixed function devices could
+also support for IFA/INT if there is enough demand.
 
 \subsection{Network-based configuration}
 
@@ -479,10 +491,10 @@ same API.
 \subsection{Complete Userspace Implementations}
 
 No discussion about new datapath technologies would be complete without
-addressing whether or not this could be implemented with a PMD/DPDK.  Is
-unlikely that anyone would implement or deploy a DPDK-based application
-on a server or switch for the sole purpose of performing any of the
-functions needed for INT/IFA.
+addressing whether or not this could be implemented with a poll mode
+driver like DPDK\cite{DPDK}.  It is unlikely that anyone would implement
+or deploy a DPDK-based application on a server or switch for the sole
+purpose of performing any of the functions needed for INT/IFA.
 
 It is likely, however, that someone using a DPDK-based application for
 performing forwarding in the core of a network may want to add INT/IFA
@@ -513,20 +525,18 @@ applications this is not that difficult -- a \texttt{git pull} and
 supported by that project.
 
 Unfortunately a standard like INT or IFA will may also require changes
-to other network infrastructure to handle these changes and not everyone
-may have access to the latest hardware running the latest versions of
-software.  As mentioned in the previous section, unfied management of
-infrastructure will prevent his from being a major issue.
+to other network infrastructure to handle these changes and not all
+administrators may have access to the latest hardware running the latest
+versions of software.  As mentioned in the previous section, unfied
+management of infrastructure will prevent his from being a major issue.
 
 \section{Acknowledgments}
 
-Special thanks to all those invoved in IFA and INT specs as well as
-those at Broadcom who did not particiapte in the writing of the
+Special thanks to all those invoved in IFA and INT specs.  Thanks also
+to those at Broadcom who did not particiapte in the writing of the
 standard, but did provide code, feedback, etc during this process.
 
 {\normalsize \bibliographystyle{acm}
 \bibliography{int}}
-
-\theendnotes
 
 \end{document}
